@@ -13,10 +13,17 @@ project ("CMakeProject1")
 
 #set(CMAKE_TOOLCHAIN_FILE "D:\\programming\\cpp\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake")
 #set(OpenCV_DIR "${VCPKG_INSTALLED_DIR}/x64-windows/share/opencv4")
+# add_definitions(-D_ATL_CSTRING_EXPLICIT_CONSTRUCTORS)
 find_package(OpenCV REQUIRED)
 # 将源代码添加到此项目的可执行文件。
-add_executable (CMakeProject1 "CMakeProject1.cpp" "CMakeProject1.h" "DFS.cpp" "DFS.h")
+add_executable (CMakeProject1 WIN32 "CMakeProject1.cpp" "CMakeProject1.h" "DFS.cpp" "DFS.h" "resource.h" )
 add_compile_definitions(_UNICODE UNICODE)
+
+# 设置资源文件
+if(WIN32)
+    enable_language(RC)
+    target_sources(CMakeProject1 PRIVATE "resource.rc")
+endif()
 
 # 设置 C++ 标准
 if (CMAKE_VERSION VERSION_GREATER 3.12)
@@ -24,5 +31,9 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
 endif()
 
 # TODO: 如有需要，请添加测试并安装目标。
+set_target_properties(CMakeProject1 PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS")
+target_link_libraries(CMakeProject1 ${OpenCV_LIBS})
+target_link_libraries(CMakeProject1 gdiplus Msimg32 atls)
 
-target_link_libraries(CMakeProject1 PRIVATE ${OpenCV_LIBS})
+# 添加 include 路径
+# include_directories(${CMAKE_SOURCE_DIR})

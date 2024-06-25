@@ -1,6 +1,10 @@
 ﻿#include "CMakeProject1.h"
 #include "DFS.h"
+#include "resource.h"
 // using namespace std;
+
+using std::string;
+using namespace Gdiplus;
 
 struct ContourInfo {
   int index;
@@ -87,6 +91,12 @@ template <typename T> typename std::vector<T>::iterator findWithSkip(std::vector
     --skipCount;
   }
   return std::find(it, vec.end(), target);
+}
+
+static std::wstring stringToWstring(const std::string &str) {
+  std::vector<wchar_t> buf(str.size() + 1);
+  mbstowcs(&buf[0], str.c_str(), str.size());
+  return std::wstring(&buf[0]);
 }
 
 static std::vector<std::string> detectColorsFromMiddleColumn(const cv::Mat &image) {
@@ -205,6 +215,11 @@ static std::vector<std::string> detectColorsFromMiddleColumn(const cv::Mat &imag
     }
   }
   std::cout << std::endl;
+
+  if (colorsVec.size() < 4) {
+    std::cout << "颜色数量小于4，无法判断试管颜色" << std::endl;
+    return blockVec;
+  }
 
   double avg = blockCount == 0 ? 0 : blockCount / 4;
   std::cout << "颜色出现次数平均值: " << avg << std::endl;
@@ -450,14 +465,395 @@ static int start(std::string path, std::string templatePath) {
   return 0;
 }
 
-int main() {
-  if (!SetCurrentDirectory(L"E:\\work-space\\CMakeProject1")) {
-    std::cerr << "Failed to set current directory";
+// int main() {
+//   if (!SetCurrentDirectory(L"E:\\work-space\\CMakeProject1")) {
+//     std::cerr << "Failed to set current directory";
+//     return 1;
+//   }
+//   std::cout << "current_path: " << std::filesystem::current_path() << std::endl;
+//   std::string path = "d:/im.png";
+//   std::string templatePath = "template.png";
+//   start(path, templatePath);
+//   return 0;
+//}
+
+std::wstring GetTempFilePath() {
+  wchar_t tempPath[MAX_PATH];
+  wchar_t tempFile[MAX_PATH];
+
+  // Get the temp path
+  if (GetTempPath(MAX_PATH, tempPath) == 0) {
+    std::cerr << "Failed to get temp path" << std::endl;
+    return L"";
+  }
+
+  // Get the temp file name
+  if (GetTempFileName(tempPath, L"IMG", 0, tempFile) == 0) {
+    std::cerr << "Failed to get temp file name" << std::endl;
+    return L"";
+  }
+
+  return std::wstring(tempFile); // Ensuring a proper extension
+}
+
+// 传入资源id和路径，把资源写入到指定路径
+void WriteResourceToFile(int resourceId, const std::wstring &filePath);
+void WriteResourceToFile(int resourceId, const std::wstring &filePath) {
+  // 获取当前模块的句柄
+  HMODULE hModule = GetModuleHandle(NULL);
+  if (!hModule) {
+    std::wcerr << L"Failed to get module handle." << std::endl;
+    return;
+  }
+
+  // 查找资源
+  HRSRC hResource = FindResource(hModule, MAKEINTRESOURCE(resourceId), L"PNG");
+  if (!hResource) {
+    std::wcerr << L"Failed to find resource." << std::endl;
+    return;
+  }
+
+  // 加载资源
+  HGLOBAL hLoadedResource = LoadResource(hModule, hResource);
+  if (!hLoadedResource) {
+    std::wcerr << L"Failed to load resource." << std::endl;
+    return;
+  }
+
+  // 获取资源数据的指针
+  LPVOID pResourceData = LockResource(hLoadedResource);
+  if (!pResourceData) {
+    std::wcerr << L"Failed to lock resource." << std::endl;
+    return;
+  }
+
+  // 获取资源的大小
+  DWORD resourceSize = SizeofResource(hModule, hResource);
+  if (resourceSize == 0) {
+    std::wcerr << L"Resource size is zero." << std::endl;
+    return;
+  }
+
+  // 将资源写入文件
+  std::ofstream outFile(filePath, std::ios::out | std::ios::binary);
+  if (!outFile) {
+    std::wcerr << L"Failed to open file for writing." << std::endl;
+    return;
+  }
+
+  outFile.write(static_cast<const char *>(pResourceData), resourceSize);
+  if (!outFile) {
+    std::wcerr << L"Failed to write resource to file." << std::endl;
+    return;
+  }
+
+  outFile.close();
+  if (!outFile) {
+    std::wcerr << L"Failed to close the file." << std::endl;
+    return;
+  }
+
+  std::wcout << L"Resource written to file successfully." << std::endl;
+}
+
+void AttachConsoleForDebug();
+void AttachConsoleForDebug() {
+  if (AllocConsole()) {
+    // 重定向标准输入
+    freopen("conin$", "r", stdin);
+
+    // 重定向标准输出
+    freopen("conout$", "w", stdout);
+    freopen("conout$", "w", stderr);
+
+    // 将控制台窗口的句柄设为stdout的默认关联句柄
+    _setmode(_fileno(stdout), _O_TEXT);
+    _setmode(_fileno(stdin), _O_TEXT);
+  }
+}
+
+std::wstring GetErrorMessage(HRESULT hr) {
+  // Check if the HRESULT is a Windows error code
+  if (HRESULT_FACILITY(hr) == FACILITY_WINDOWS) {
+    hr = HRESULT_CODE(hr);
+  }
+
+  wchar_t *errorMsg = nullptr;
+
+  // Try to format the message
+  DWORD result = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, hr, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                               reinterpret_cast<LPWSTR>(&errorMsg), 0, nullptr);
+
+  std::wstring message;
+  if (result) {
+    message = errorMsg;
+    LocalFree(errorMsg);
+  } else {
+    // If FormatMessage fails, use _com_error for more detail
+    _com_error err(hr);
+    message = err.ErrorMessage();
+  }
+
+  // Handle some specific HRESULT error codes
+  if (message.empty()) {
+    switch (hr) {
+    case E_FAIL:
+      message = L"Unspecified failure (E_FAIL)";
+      break;
+    case E_ACCESSDENIED:
+      message = L"General access denied error (E_ACCESSDENIED)";
+      break;
+    case E_OUTOFMEMORY:
+      message = L"Out of memory (E_OUTOFMEMORY)";
+      break;
+    case E_INVALIDARG:
+      message = L"One or more arguments are not valid (E_INVALIDARG)";
+      break;
+    case E_NOTIMPL:
+      message = L"Not implemented (E_NOTIMPL)";
+      break;
+    case E_POINTER:
+      message = L"Invalid pointer (E_POINTER)";
+      break;
+    default:
+      message = L"Unknown error";
+      break;
+    }
+  }
+
+  return message;
+}
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+void CaptureScreenshotFromUser(HWND hwnd);
+
+static std::string templateTempPath;
+static std::string screenshotTempPath;
+
+void DeleteTempFiles();
+// 删除临时文件
+void DeleteTempFiles() {
+  if (std::filesystem::exists(templateTempPath)) {
+    std::filesystem::remove(templateTempPath);
+    return;
+  }
+  if (std::filesystem::exists(screenshotTempPath)) {
+    std::filesystem::remove(screenshotTempPath);
+    return;
+  }
+}
+
+// 控制台关闭事件处理函数
+BOOL WINAPI ConsoleHandler(DWORD signal) {
+  if (signal == CTRL_CLOSE_EVENT || signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
+    std::wcout << L"Console window is closing..." << std::endl;
+    // 在此处执行退出时的清理操作
+    DeleteTempFiles();
+    return TRUE;
+  }
+  return FALSE;
+}
+
+int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
+  GdiplusStartupInput gdiplusStartupInput;
+  ULONG_PTR gdiplusToken;
+  GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
+  AllocConsole();
+  FILE *fp;
+  freopen_s(&fp, "CONOUT$", "w", stdout);
+  std::wstring tmp = GetTempFilePath();
+  std::wstring tmp2 = GetTempFilePath();
+  templateTempPath = std::string(tmp.begin(), tmp.end());
+  screenshotTempPath = std::string(tmp2.begin(), tmp2.end());
+  WriteResourceToFile(TEMPLATE_PNG, tmp);
+
+  const wchar_t CLASS_NAME[] = L"Sample Window Class";
+
+  WNDCLASS wc = {};
+  wc.lpfnWndProc = WindowProc;
+  wc.hInstance = hInstance;
+  wc.lpszClassName = CLASS_NAME;
+
+  RegisterClass(&wc);
+
+  HWND hwnd = CreateWindowEx(0, CLASS_NAME, L"Sample Window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, nullptr, nullptr, hInstance, nullptr);
+
+  if (hwnd == nullptr) {
+    return 0;
+  }
+
+  ShowWindow(hwnd, nCmdShow);
+
+
+  // 注册控制台关闭处理函数
+  if (SetConsoleCtrlHandler(ConsoleHandler, TRUE)) {
+    std::wcout << L"Control handler installed." << std::endl;
+  } else {
+    std::wcerr << L"Error: could not set control handler." << std::endl;
     return 1;
   }
-  std::cout << "current_path: " << std::filesystem::current_path() << std::endl;
-  std::string path = "d:/im.png";
-  std::string templatePath = "template.png";
-  start(path, templatePath);
+
+  MSG msg = {};
+  while (GetMessage(&msg, nullptr, 0, 0)) {
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
+  }
+  FreeConsole();
+  GdiplusShutdown(gdiplusToken);
+  UnregisterClass(wc.lpszClassName, wc.hInstance);
+  DeleteTempFiles();
   return 0;
+}
+static CImage screenshot;
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+  static HWND hwndCaptureButton;
+  static HWND hwndStartButton;
+  static RECT topRect;
+  static RECT bottomRect;
+
+  switch (uMsg) {
+  case WM_CREATE:
+    hwndCaptureButton = CreateWindow(L"BUTTON", L"获取截图", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 200, 510, 100, 30, hwnd, (HMENU)IDC_BUTTON_CAPTURE,
+                                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), nullptr);
+
+    hwndStartButton = CreateWindow(L"BUTTON", L"开始识别", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 500, 510, 100, 30, hwnd, (HMENU)IDC_BUTTON_START,
+                                   (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), nullptr);
+
+    // Define the top and bottom regions
+    GetClientRect(hwnd, &topRect);
+    topRect.bottom = topRect.bottom * 0.8;
+    bottomRect.top = topRect.bottom;
+    bottomRect.bottom = bottomRect.top + 120; // Adjust height for bottom part
+    break;
+
+  case WM_COMMAND:
+    if (LOWORD(wParam) == IDC_BUTTON_CAPTURE) {
+      CaptureScreenshotFromUser(hwnd);
+    } else if (LOWORD(wParam) == IDC_BUTTON_START) {
+      if (!screenshot.IsNull()) {
+        SaveClipboardImage(stringToWstring(screenshotTempPath).c_str());
+        std::cout << screenshotTempPath << std::endl;
+        start(screenshotTempPath, templateTempPath);
+      }
+    }
+    break;
+
+  case WM_PAINT: {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+
+    // Fill top part with a color
+    FillRect(hdc, &topRect, (HBRUSH)(COLOR_WINDOW + 1));
+
+    // Draw the screenshot if available
+    if (!screenshot.IsNull()) {
+      long width = screenshot.GetWidth();
+      long height = screenshot.GetHeight();
+      long containerWidth = topRect.right - topRect.left;
+      long containerHeight = topRect.bottom - topRect.top;
+      double ratio = std::max((double)width / containerWidth, (double)height / containerHeight);
+      screenshot.Draw(hdc, (containerWidth - width / ratio) / 2, (containerHeight - height / ratio) / 2, width / ratio, height / ratio);
+      // screenshot.Draw(hdc, topRect.left, topRect.top, topRect.right - topRect.left, topRect.bottom - topRect.top);
+    }
+
+    // Fill bottom part with a color
+    FillRect(hdc, &bottomRect, (HBRUSH)(COLOR_3DFACE + 1));
+
+    EndPaint(hwnd, &ps);
+  } break;
+  case WM_DESTROY:
+    PostQuitMessage(0);
+    break;
+
+  default:
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+  }
+  return 0;
+}
+
+void SaveClipboardImage(const wchar_t *filename) {
+  // 初始化GDI+
+  GdiplusStartupInput gdiplusStartupInput;
+  ULONG_PTR gdiplusToken;
+  GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
+
+  // 打开剪贴板
+  if (OpenClipboard(nullptr)) {
+    // 获取剪贴板中的图片数据
+    HBITMAP hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
+    if (hBitmap) {
+      // 将HBITMAP转换为GDI+的Bitmap
+      Bitmap bitmap(hBitmap, nullptr);
+
+      // 保存图片到文件
+      CLSID pngClsid;
+      GetEncoderClsid(L"image/png", &pngClsid);
+      bitmap.Save(filename, &pngClsid, nullptr);
+    } else {
+      std::wcerr << L"剪贴板中没有图片数据。" << std::endl;
+    }
+    // 关闭剪贴板
+    CloseClipboard();
+  } else {
+    std::wcerr << L"无法打开剪贴板。" << std::endl;
+  }
+
+  // 关闭GDI+
+  GdiplusShutdown(gdiplusToken);
+}
+
+// 获取编码器的CLSID
+int GetEncoderClsid(const WCHAR *format, CLSID *pClsid) {
+  UINT num = 0;
+  UINT size = 0;
+
+  GetImageEncodersSize(&num, &size);
+  if (size == 0)
+    return -1;
+
+  ImageCodecInfo *pImageCodecInfo = (ImageCodecInfo *)(malloc(size));
+  if (pImageCodecInfo == nullptr)
+    return -1;
+
+  GetImageEncoders(num, size, pImageCodecInfo);
+
+  for (UINT j = 0; j < num; ++j) {
+    if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+      *pClsid = pImageCodecInfo[j].Clsid;
+      free(pImageCodecInfo);
+      return j;
+    }
+  }
+  free(pImageCodecInfo);
+  return -1;
+}
+
+void CaptureScreenshotFromUser(HWND hwnd) {
+  if (OpenClipboard(nullptr)) {
+    HBITMAP hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
+    if (hBitmap) {
+      if (GetObjectType(hBitmap) == OBJ_BITMAP) {
+        if (!screenshot.IsNull()) {
+          HBITMAP hb = screenshot.Detach();
+          if (hb != NULL) {
+            DeleteObject(hb);
+          }
+        }
+
+        // Convert the HBITMAP to a CImage
+        screenshot.Attach(hBitmap);
+
+        // Save the screenshot to a file
+        // screenshot.Save(L"screenshot.png");
+
+        // Display the screenshot in the window
+        InvalidateRect(hwnd, nullptr, TRUE);
+      }
+    }
+    CloseClipboard();
+  }
+
+  // Redraw the window to display the new screenshot
+  InvalidateRect(hwnd, nullptr, TRUE);
 }

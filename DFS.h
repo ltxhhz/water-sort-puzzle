@@ -4,7 +4,10 @@
 #include <iostream>
 #include <map>
 #include <vector>
-using namespace std;
+using std::vector;
+using std::map;
+using std::endl;
+using std::cout;
 
 struct Step {
   int deep;
